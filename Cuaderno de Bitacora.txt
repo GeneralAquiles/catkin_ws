@@ -1,0 +1,543 @@
+----Se instalo ROS -------
+----Se intalo paquete UA_ROS_P3DX-----
+	contiene el modelo del robot y los publishers de cada elemento
+----Se instalo paquete tf_transfomación----
+	contiene la transformada de el laser lms100
+----Se instalo paquete ejemplo laser ----
+	Tanto el modelo del robot como los puntos del laser bien recividos en
+	base_link en Rviz
+----Se instalo ejerciciogrid, detectobject y ppurepursuit ----
+	el mapa de ocupación se muestra sin problemas, pero no se encuentra la
+	manera de reducir el tamaño de las celdas
+
+	detect object no reacciona aparentemente
+
+	purepursuit no reacciona a la seleccion de puntos en rviz
+
+
+----Necesario paquete de navigation----------
+git clone https://github.com/ros-planning/navigation.git
+
+
+----Error encontrado al hacer catkin ------------------
+
+SOLUCION:  sudo apt-get install libsdl-image1.2-dev
+	   sudo apt-get install libsdl-dev
+
+---Error sigue mostrando la falta de move_base_msgs ----
+
+SOLUCION: install navigation_msgs 
+
+
+----Error encontrado al hacer ccatkin ------------------
+CMake Warning at /opt/ros/kinetic/share/catkin/cmake/catkinConfig.cmake:76 (find_package):
+  Could not find a package configuration file provided by "tf2_sensor_msgs"
+  with any of the following names:
+
+    tf2_sensor_msgsConfig.cmake
+    tf2_sensor_msgs-config.cmake
+
+SOLUCION: sudo apt-get install ros-melodic-tf2-sensor-msgs
+
+-----Compilacion correcta -- Error en rviz ---------
+	Las transformaciones se han desconfigurado, el robot no aparece montado y
+	laser scan ya no consigue transformar los datos a rviz
+
+
+-----He eliminado los paquetes de navigation para intentar revertirlo, no es posible----
+
+
+----Paso a atacarlo desde un punto diferente----
+	Voy a instalar ROSARIA
+	·Clono repositorio de ROSARIA
+	·Instalo la libreria ARIA
+	·Meto ua_ros_p3dx en src
+	·compilo
+
+---La compilación ha ido bien pero la ejecucion mal-----
+	Paso a meter el modelo P3dx de https://github.com/rnitin/pioneer-ros
+
+--oncitnuo obteniendo el mismo error ----
+	[ERROR] [1602623226.262345391]: RosAria: ARIA could not connect to robot! (Check ~port parameter is correct, and permissions on port device, or any errors reported above)
+	[FATAL] [1602623226.262382128]: RosAria: ROS node setup failed... 
+
+	Creo enternder por que es, si no entiendo mal esta intentanndo encontrar un puerto de comunicacion con el robot en físico, concretamente el puerto USB0:
+
+	[ INFO] [1602623226.252139751]: RosAria: set port: [/dev/ttyUSB0]
+	Connnecting to robot using TCP connection to localhost:8101...
+	Could not connect to simulator, connecting to robot through serial port /dev/ttyUSB0.
+	ArSerialConnection::open: Could not open serial port '/dev/ttyUSB0' | ErrorFromOSNum: 2 ErrorFromOSString: No such file or directory
+	Could not connect, because open on the device connection failed.
+	Failed to connect to robot.
+
+
+----- Reincio mi WS -------
+	Meto solo el robot y el tf_transformación
+	Compila bien pero nocuentra el launchfile para el p3dx
+
+
+-----PROBLEMAS SOLUCIONADOS------
+	En lo referente al lanch file, no lo estaba llamando bien, el nombre del que existe en el paquete de ua_ROS_p3dx es "gazebo.launch". Por tanto, el comando queda:
+
+		roslaunch p3dx_gazebo gazebo.launch
+	
+	En cuanto al problema de las transformadas, era debido a que dicho launch file, no ejecutaba el robot state publisher ni el robot joint publisher, por lo que  no se 
+	estaban prublicando los fallos tal y como apuntaban los errores.
+	La solucion es añadir en el launch file lo que sigue:
+
+			<!--  ******************** Joint State Publisher ********************  -->
+			<node name="joint_state_publisher" pkg="joint_state_publisher" type="joint_state_publisher" />
+
+			<!--  ******************** Robot State Publisher ********************  -->
+			<node name="robot_state_publisher" pkg="robot_state_publisher" type="state_publisher" />
+
+
+	Una vez compilado esto, ya comienza a funcionar sin problemas. Hasta la fecha se esta generando bien el laser, el grid y el purepursuit. En este momento me encuentro
+	intentando hacer un script para ejecutar todos los programas y nodos automaticamnente.
+
+
+-----Comienzo a crear el mapa--------
+	Tras estar haciendo pruebas, son necesarios dos paquetes en total: slam_gmapping y openslam_gmapping
+
+	A pesar de estar ejecutando "rosrun gmapping slam_gmapping scan:=base_scan"  el mapa no se muestra ( o almenos no se hacerlo), indica que le falta algo (que esta vacio si no recuerdo mal)
+
+	por lo que parece, gmapping espera recibir  mensajes en el topic scan, q claramente no esta recibiendo nada porque el mio es /p3dx/laser/scan
+
+	no consigo hacer que vaya, tengo un total de 2 warnings:
+		no hay transformada de map a base_link
+		no se recibe mapa
+		sigue habiendo un topic /scan, no se de donde sale 
+		he modificado slam_gmapping.cpp y slam_gmapping_pr2.launch
+
+	CASUALMENTE  me he encontrado con el mismo tipo de problema intentando controlar el robot con teleop, me crea un topic cmd_vel, el cual no es el topic del robot, y no detecta ningun subscriber ya que el robot no se subscrbe a ese nodo.
+	 
+
+-------Problema de gmapping solucionado---------------
+	Ya consigo lanzar bien el nodo, el problema estaba  en la manera de la que intentaba refactorizar el topic al lanzar el nodo. Se hace:  
+		rosrun gmapping slam_gmapping scan:=/p3dx/laser/scan;
+
+	El problema está ahora en que falta una transformada para /map hacia /base_lin, lo que me da la sensacion de que hay alguna rutina/nodo que no hhe ejecutado y es necsario
+
+
+-----EL MAPEO YA ESTA FUNCIONANDO----------------------
+	Tras mucho probar, he decidido prescindir de gmapping e implemetar el paquete de Hector_Slam, el cual viene perfectamente implementado sin necesidad de hacer toda la integración
+	de gmapping y demas. Lo unico necesario es cambiar los topics a los que escucha:
+
+		### el archivo a modificar es /opt/ros/melodic/share/hector_mapping/launch/mapping_default.launch###
+
+		· Topic de scan: p3dx/laser/scan
+		· Topic base frame: base_link
+		· Topic odometría: originalmente viene con nav, yo probé con odom que era lo mas logico, pero no hacia el mapa bien,  tenia bugs y demas. Finalmente lo pasé a base_link
+		· SI LA TRANSFORMADA DEL MAPA FALLA: cambia el frame (primer argunmento de abajo)
+
+		##  <arg name="tf_map_scanmatch_transform_frame_name" default="odom"/>
+		##  <arg name="base_frame" default="base_link"/>
+		##  <arg name="odom_frame" default="base_link"/>
+		##  <arg name="pub_map_odom_transform" default="true"/>
+		##  <arg name="scan_subscriber_queue_size" default="5"/>
+		##  <arg name="scan_topic" default="p3dx/laser/scan"/>
+		##  <arg name="map_size" default="4096"/>
+
+	Con todo esto el mapa ya se genera correctamente, no sin fallos de ejecución momentaneos.
+
+----Incluido el edificio de insdustriales-------------
+
+	Para crear el edificio, una vez se tiene el modelo en STL, se exporta a formado .dae. 
+		·A continuación, creo una carpeta en /pablo/.gazebo/models con el nnombre ETSII.
+		·Dentro de ella creo dos carpetas: meshes (donde van los archivos dae) y textures (donde van las texturas)
+		·A su vez, tambien genero un archivo model.config y model.sdf, que contienen la info del paquete y la configuración del
+		 modelo
+	
+	Una vez hecho esto, me aseguro que .world se esta incluyendo en el gazebo.launch que estoy ejecutando para las simulaciones. Cuando lo 
+	tenga localizado (en estecaso p3dx.worl), en él incluyo la carpeta que he creado con el modelo:
+		    <!-- World model -->
+		    <include>
+		      <uri>model://ETSII</uri>
+		    </include>
+	A continuación, en el archivo gazebo.launch, del paquete p3dx, debemos modificar la siguiente linea para que el robot spawnee en el suelo del edificio:
+		    respawn="false" output="screen" args="-urdf -model p3dx -param robot_description -z 14" />
+
+	Con esto ya se me carga el mundo con el edificio y puedo realizar un mapeado. Sin embargo, ese necesario averiguar como colocar el robot
+	en un punto mas centrado en el edificio, ya que actualmente aparece fuera de el.
+
+
+-----Necesito que se mueva autonomo y me guarde el mapa---------
+
+	EL MAPA SE GUARDA
+	Para que el mapa se guarde correctamente necesito lo siguiente:
+	·Una carpeta para los mapas dentro de Hecotr_geotiff
+		sudo mkdir /opt/ros/melodic/share/hector_geotiff/maps
+	·Cambiar el propietario del directorio de root a tu usuario para poder guardar los mapas
+		sudo chown -R $USER:$USER /opt/ros
+	·ejecutar la generacion de mapa
+		roslaunch hector_slam_launch myp3dx.launch
+	·Una vez terminado el proceso de mapeo, emitir el mensaje de guardado
+		rostopic pub syscommand std_msgs/String "savegeotiff"
+	(Es potencialmente posible que necesite ser ejecutado en una ventana aparte y cancelado manualmente, en vez de matar el proceso)	
+	
+
+----Errores tratando de instalar el paquete autonomo------
+	Tras buscar, paraece ser que el paquete q necesito para que genere goals por si solo es hector_navigation,
+		git clone https://github.com/tu-darmstadt-ros-pkg/hector_navigation.git
+	Al compilarlo me salta un error de que le falta un paquete:
+		CMake Error at /opt/ros/melodic/share/catkin/cmake/catkinConfig.cmake:83 (find_package):
+		  Could not find a package configuration file provided by "costmap_2d" with
+		  any of the following names:
+
+		    costmap_2dConfig.cmake
+		    costmap_2d-config.cmake
+
+		  Add the installation prefix of "costmap_2d" to CMAKE_PREFIX_PATH or set
+		  "costmap_2d_DIR" to a directory containing one of the above files.  If
+		  "costmap_2d" provides a separate development package or SDK, be sure it has
+		  been installed.
+		Call Stack (most recent call first):
+		  hector_navigation/hector_exploration_planner/CMakeLists.txt:7 (find_package)
+
+
+	Instalo el paquete:
+		git clone https://github.com/ros-planning/navigation.git
+	Al compilarlo me salta un error de que le falta un paquete:
+		CMake Error at /home/pablo/catkin_ws/devel/share/hector_map_tools/cmake/hector_map_toolsConfig.cmake:113 (message):
+		  Project 'hector_map_tools' specifies
+		  '/home/pablo/catkin_ws/src/hector_slam/hector_map_tools/include' as an
+		  include dir, which is not found.  It does neither exist as an absolute
+		  directory nor in
+		  '/home/pablo/catkin_ws/src/hector_slam/hector_map_tools//home/pablo/catkin_ws/src/hector_slam/hector_map_tools/include'.
+		  Check the website 'http://ros.org/wiki/hector_map_tools' for information
+		  and consider reporting the problem.
+		Call Stack (most recent call first):
+		  /opt/ros/melodic/share/catkin/cmake/catkinConfig.cmake:76 (find_package)
+		  hector_navigation/hector_elevation_visualization/CMakeLists.txt:7 (find_package)
+
+
+	Instalo el paquete:
+		 git clone https://github.com/tu-darmstadt-ros-pkg/hector_slam.git
+	Al compilarlo me salta un error de que le falta un paquete:
+		-- Could not find the required component 'geodesy'. The following CMake error indicates that you either need to install the package with the same name or change your environment so that it can be found.
+		CMake Error at /opt/ros/melodic/share/catkin/cmake/catkinConfig.cmake:83 (find_package):
+		  Could not find a package configuration file provided by "geodesy" with any
+		  of the following names:
+
+		    geodesyConfig.cmake
+		    geodesy-config.cmake
+
+		  Add the installation prefix of "geodesy" to CMAKE_PREFIX_PATH or set
+		  "geodesy_DIR" to a directory containing one of the above files.  If
+		  "geodesy" provides a separate development package or SDK, be sure it has
+		  been installed.
+		Call Stack (most recent call first):
+		  hector_navigation/hector_gps_calibration/CMakeLists.txt:10 (find_package)
+
+
+	Instalo el paquete:
+		git clone https://github.com/ros-geographic-info/geographic_info.git
+	Al compilarlo me salta un error de que le falta un paquete:
+		-- Could not find the required component 'uuid_msgs'. The following CMake error indicates that you either need to install the package with the same name or change your environment so that it can be found.
+		CMake Error at /opt/ros/melodic/share/catkin/cmake/catkinConfig.cmake:83 (find_package):
+		  Could not find a package configuration file provided by "uuid_msgs" with
+		  any of the following names:
+
+		    uuid_msgsConfig.cmake
+		    uuid_msgs-config.cmake
+
+		  Add the installation prefix of "uuid_msgs" to CMAKE_PREFIX_PATH or set
+		  "uuid_msgs_DIR" to a directory containing one of the above files.  If
+		  "uuid_msgs" provides a separate development package or SDK, be sure it has
+		  been installed.
+		Call Stack (most recent call first):
+		  geographic_info/geographic_msgs/CMakeLists.txt:4 (find_package)
+
+
+	Instalo el paquete:
+		git clone https://github.com/ros-geographic-info/unique_identifier.git
+	Al compilarlo me salta un error de que le falta un paquete:
+
+		-- Could NOT find ceres_catkin (missing: ceres_catkin_DIR)
+		-- Could not find the required component 'ceres_catkin'. The following CMake error indicates that you either need to install the package with the same name or change your environment so that it can be found.
+		CMake Error at /opt/ros/melodic/share/catkin/cmake/catkinConfig.cmake:83 (find_package):
+		  Could not find a package configuration file provided by "ceres_catkin" with
+		  any of the following names:
+
+		    ceres_catkinConfig.cmake
+		    ceres_catkin-config.cmake
+
+		  Add the installation prefix of "ceres_catkin" to CMAKE_PREFIX_PATH or set
+		  "ceres_catkin_DIR" to a directory containing one of the above files.  If
+		  "ceres_catkin" provides a separate development package or SDK, be sure it
+		  has been installed.
+		Call Stack (most recent call first):
+		  hector_navigation/hector_gps_calibration/CMakeLists.txt:10 (find_package)
+
+
+	Instalo el paquete:
+		pablo@TUF-Gaming:~/catkin_ws/src$ git clone https://toscode.gitee.com/luhongquan66/ceres_catkin.git
+
+	Al compilarlo me salta un error de que le falta un paquete:
+		CMake Error at ceres_catkin/CMakeLists.txt:4 (find_package):
+		  By not providing "Findcatkin_simple.cmake" in CMAKE_MODULE_PATH this
+		  project has asked CMake to find a package configuration file provided by
+		  "catkin_simple", but CMake did not find one.
+
+		  Could not find a package configuration file provided by "catkin_simple"
+		  with any of the following names:
+
+		    catkin_simpleConfig.cmake
+		    catkin_simple-config.cmake
+
+		  Add the installation prefix of "catkin_simple" to CMAKE_PREFIX_PATH or set
+		  "catkin_simple_DIR" to a directory containing one of the above files.  If
+		  "catkin_simple" provides a separate development package or SDK, be sure it
+		  has been installed.
+
+
+	Instalo el paquete:
+		 git clone https://github.com/catkin/catkin_simple.git
+	Al compilarlo me salta un error de que le falta un paquete:
+		CMake Error at /home/pablo/catkin_ws/devel/share/ceres_catkin/cmake/ceres_catkinConfig.cmake:173 (message):
+		  Project 'hector_gps_calibration' tried to find library 'ceres'.  The
+		  library is neither a target nor built/installed properly.  Did you compile
+		  project 'ceres_catkin'? Did you find_package() it before the subdirectory
+		  containing its code is included?
+		Call Stack (most recent call first):
+		  /opt/ros/melodic/share/catkin/cmake/catkinConfig.cmake:76 (find_package)
+		  hector_navigation/hector_gps_calibration/CMakeLists.txt:10 (find_package)
+
+	#decido ignorar la funncion hector_gps_calibration
+	#me salta q necesita el paquete tf2_sensor_msgs
+	instalo el paquete
+		git clone https://github.com/ros/geometry2.git
+
+	Al compilarlo me salta un error de que le falta un paquete:
+
+
+	Instalo el paquete
+		https://github.com/ros-planning/navigation_msgs.git
+
+	############################################################
+		fallo fatal
+	############################################################
+	Tras instalar el ultimo paquete ya no falta niguna dependencia y comienza a compilar, casi al final aparece un fallo desconocido en librerias internas
+
+		[ 72%] Generating Python code from SRV geographic_msgs/GetGeographicMap
+		-- Looking for pthread_create - not found
+		-- Looking for pthread_create in pthreads
+		[ 72%] Generating EusLisp manifest code for geographic_msgs
+		[ 72%] Built target geographic_msgs_generate_messages_cpp
+		-- Looking for pthread_create in pthreads - not found
+		-- Looking for pthread_create in pthread
+		[ 72%] Built target map_to_image_node
+		[ 72%] Generating Python srv __init__.py for geographic_msgs
+		[ 73%] Generating Python msg __init__.py for geographic_msgs
+		-- Looking for pthread_create in pthread - found
+		-- Found Threads: TRUE  
+		-- A library with BLAS API found.
+		[ 73%] Built target geographic_msgs_generate_messages_py
+		-- Found LAPACK library: /usr/lib/x86_64-linux-gnu/liblapack.so;/usr/lib/x86_64-linux-gnu/libblas.so
+		-- Found BLAS library: /usr/lib/x86_64-linux-gnu/libblas.so
+		-- A library with BLAS API found.
+		-- Failed to find SuiteSparse - Did not find AMD library (required SuiteSparse component).
+		-- Failed to find SuiteSparse - Did not find AMD header (required SuiteSparse component).
+		-- Failed to find SuiteSparse - Did not find CAMD library (required SuiteSparse component).
+		-- Failed to find SuiteSparse - Did not find CAMD header (required SuiteSparse component).
+		-- Failed to find SuiteSparse - Did not find COLAMD library (required SuiteSparse component).
+		-- Failed to find SuiteSparse - Did not find COLAMD header (required SuiteSparse component).
+		-- Failed to find SuiteSparse - Did not find CCOLAMD library (required SuiteSparse component).
+		-- Failed to find SuiteSparse - Did not find CCOLAMD header (required SuiteSparse component).
+		-- Failed to find SuiteSparse - Did not find CHOLMOD library (required SuiteSparse component).
+		-- Failed to find SuiteSparse - Did not find CHOLMOD header (required SuiteSparse component).
+		-- Failed to find SuiteSparse - Did not find SuiteSparseQR library (required SuiteSparse component).
+		-- Failed to find SuiteSparse - Did not find SUITESPARSEQR header (required SuiteSparse component).
+		-- Failed to find SuiteSparse - Failed to find either: SuiteSparse_config header & library (should be present in all SuiteSparse >= v4 installs), or UFconfig header (should be present in all SuiteSparse < v4 installs).
+		-- Did not find METIS library (optional SuiteSparse dependency)
+		-- Failed to find some/all required components of SuiteSparse. (missing: AMD_FOUND CAMD_FOUND COLAMD_FOUND CCOLAMD_FOUND CHOLMOD_FOUND SUITESPARSEQR_FOUND SUITESPARSE_VERSION) 
+		-- Did not find all SuiteSparse dependencies, disabling SuiteSparse support.
+		-- Failed to find CXSparse - Could not find CXSparse include directory, set CXSPARSE_INCLUDE_DIR to directory containing cs.h
+		-- Did not find CXSparse, Building without CXSparse.
+		   ===============================================================
+		   Compiling without any sparse library: SuiteSparse, CXSparse 
+		   & Eigen (Sparse) are all disabled or unavailable.  No sparse 
+		   linear solvers (SPARSE_NORMAL_CHOLESKY & SPARSE_SCHUR)
+		   will be available when Ceres is used.
+		   ===============================================================
+		-- No preference for use of exported gflags CMake configuration set, and no hints for include/library directories provided. Defaulting to preferring an installed/exported gflags CMake configuration if available.
+		-- Failed to find installed gflags CMake configuration, searching for gflags build directories exported with CMake.
+		-- Failed to find an installed/exported CMake configuration for gflags, will perform search for installed gflags components.
+		-- Failed to find gflags - Could not find gflags include directory, set GFLAGS_INCLUDE_DIR to directory containing gflags/gflags.h
+		-- Did not find Google Flags (gflags), Building without gflags - no tests or tools will be built!
+		-- No preference for use of exported glog CMake configuration set, and no hints for include/library directories provided. Defaulting to preferring an installed/exported glog CMake configuration if available.
+		-- Failed to find installed glog CMake configuration, searching for glog build directories exported with CMake.
+		-- Failed to find an installed/exported CMake configuration for glog, will perform search for installed glog components.
+		-- Failed to find glog - Could not find glog include directory, set GLOG_INCLUDE_DIR to directory containing glog/logging.h
+		CMake Error at CMakeLists.txt:385 (message):
+		  Can't find Google Log (glog).  Please set either: glog_DIR (newer CMake
+		  built versions of glog) or GLOG_INCLUDE_DIR & GLOG_LIBRARY or enable
+		  MINIGLOG option to use minimal glog implementation.
+
+
+		-- Configuring incomplete, errors occurred!
+		See also "/home/pablo/catkin_ws/build/ceres_catkin/ceres_src-prefix/src/ceres_src-build/CMakeFiles/CMakeOutput.log".
+		See also "/home/pablo/catkin_ws/build/ceres_catkin/ceres_src-prefix/src/ceres_src-build/CMakeFiles/CMakeError.log".
+		ceres_catkin/CMakeFiles/ceres_src.dir/build.make:106: fallo en las instrucciones para el objetivo 'ceres_catkin/ceres_src-prefix/src/ceres_src-stamp/ceres_src-configure'
+		make[2]: *** [ceres_catkin/ceres_src-prefix/src/ceres_src-stamp/ceres_src-configure] Error 1
+		CMakeFiles/Makefile2:559: fallo en las instrucciones para el objetivo 'ceres_catkin/CMakeFiles/ceres_src.dir/all'
+		make[1]: *** [ceres_catkin/CMakeFiles/ceres_src.dir/all] Error 2
+		make[1]: *** Se espera a que terminen otras tareas....
+
+
+	#### Es altamente probable que el error este en el paquete navigation####
+	Me h epercatado de que la rama a la que esta apuntando el paquete es de la version netic, no la melodic
+		git clone  https://github.com/ros-planning/navigation.git -b melodic-devel
+		git clone https://github.com/ros/geometry2.git -b melodic-devel
+
+
+---------FINALMENTE COMPILA----------
+	Tras mucho probar, ha bastado con asegurarme de que todos los paquetes se encuentran en la rama de melodic, o la master en su defecto.
+	Además, he tenido que eliminar ceres que era la raiz del problema. Esto implica, que el paquete calibration_gps de hector_navigation lo he 
+	tenido que quitar, ya q no funciona sin ceres
+
+
+---------No entiendo como hacer que funcione hector_banigation---------
+
+[ WARN] [1604951378.994049062, 21.529000000]: Timed out waiting for transform from base_link to map to become available before running costmap, tf error: canTransform: target_frame map does not exist.. canTransform returned after 21.529 timeout was 0.1.
+[ WARN] [1604951379.924386786, 22.386000000]: global_costmap: Parameter "plugins" not provided, loading pre-Hydro parameters
+[ INFO] [1604951379.931481149, 22.391000000]: global_costmap: Using plugin "obstacle_layer"
+[ INFO] [1604951379.960274581, 22.419000000]:     Subscribed to Topics: 
+[ INFO] [1604951379.970411201, 22.430000000]: global_costmap: Using plugin "inflation_layer"
+[ INFO] [1604951380.006191019, 22.461000000]: [hector_exploration_planner] Initializing HectorExplorationPlanner
+[ INFO] [1604951380.030752571, 22.481000000]: [hector_exploration_planner] Parameter set. security_const: 0.500000, min_obstacle_dist: 1000, plan_in_unknown: 1, use_inflated_obstacle: 1, p_goal_angle_penalty_:50 , min_frontier_size: 5, p_dist_for_goal_reached_: 0.250000, same_frontier: 0.250000
+
+
+
+--------Resuelto el error de que no encontraba la transformada-----------
+	Tras probar muchisimas cosas, ha quedado en volver a retocar mapping_default.launch para que use scanMatcher
+
+	por otro lado, he modificado el costmap.yaml para que entienda map como un topic al que escuchar
+
+
+-------Como hacer que el robot se mueva solo------------------------
+	He encontrado un launch file con el que puede que arranque, lo he llamado my_exploration_plan.lauunch
+
+
+
+
+	ERROR: cannot launch node of type [hector_driving_aid_markers/driving_aid_marker_node]: Cannot locate node of type [driving_aid_marker_node] in package [hector_driving_aid_markers]. Make sure file exists in package path and permission is set to executable (chmod +x)
+
+	comentando lo q no necesito aparentemente ya no hay mas fallos, pero no hace nada.
+
+... logging to /home/pablo/.ros/log/38d61c3e-277d-11eb-aa3a-a85e45d49cf1/roslaunch-TUF-Gaming-22030.log
+Checking log directory for disk usage. This may take a while.
+Press Ctrl-C to interrupt
+Done checking log file disk usage. Usage is <1GB.
+
+started roslaunch server http://TUF-Gaming:40245/
+
+SUMMARY
+========
+
+PARAMETERS
+ * /hector_costmap/cloud_topic: openni/depth/points
+ * /hector_costmap/cost_map_topic: cost_map
+ * /hector_costmap/costmap_pub_freq: 4.0
+ * /hector_costmap/elevation_map_topic: elevation_map_local
+ * /hector_costmap/grid_map_topic: scanmatcher_map
+ * /hector_costmap/initial_free_cells_radius: 0.3
+ * /hector_costmap/local_transform_frame_id: base_footprint
+ * /hector_costmap/map_frame_id: map
+ * /hector_costmap/sys_msg_topic: syscommand
+ * /hector_costmap/update_radius: 4.0
+ * /hector_costmap/use_cloud_map: False
+ * /hector_costmap/use_elevation_map: False
+ * /hector_costmap/use_grid_map: True
+ * /hector_driving_aid_markers/left_side_y_inner: 0.11
+ * /hector_driving_aid_markers/left_side_y_outer: 0.205
+ * /hector_driving_aid_markers/right_side_y_inner: -0.11
+ * /hector_driving_aid_markers/right_side_y_outer: -0.205
+ * /hector_exploration_node/global_costmap/circumscribed_radius: 0.32
+ * /hector_exploration_node/global_costmap/cost_scaling_factor: 10.0
+ * /hector_exploration_node/global_costmap/footprint: [[0.25, 0.21], [-...
+ * /hector_exploration_node/global_costmap/global_frame: map
+ * /hector_exploration_node/global_costmap/inflation_radius: 0.32
+ * /hector_exploration_node/global_costmap/inscribed_radius: 0.3
+ * /hector_exploration_node/global_costmap/map_type: costmap
+ * /hector_exploration_node/global_costmap/obstacle_range: 2.5
+ * /hector_exploration_node/global_costmap/publish_frequency: 0.1
+ * /hector_exploration_node/global_costmap/raytrace_range: 3.0
+ * /hector_exploration_node/global_costmap/robot_base_frame: base_link
+ * /hector_exploration_node/global_costmap/rolling_window: False
+ * /hector_exploration_node/global_costmap/static/map_topic: /map
+ * /hector_exploration_node/global_costmap/static/subscribe_to_updates: True
+ * /hector_exploration_node/global_costmap/static_map: True
+ * /hector_exploration_node/global_costmap/track_unknown_space: True
+ * /hector_exploration_node/global_costmap/transform_tolerance: 0.5
+ * /hector_exploration_node/global_costmap/unknown_cost_value: 255
+ * /hector_exploration_node/global_costmap/update_frequency: 0.5
+ * /rosdistro: melodic
+ * /rosversion: 1.14.9
+
+NODES
+  /
+    hector_costmap (hector_costmap/hector_costmap)
+    hector_driving_aid_markers (hector_driving_aid_markers/hector_driving_aid_markers_node)
+    hector_exploration_node (hector_exploration_node/exploration_planner_node)
+
+ROS_MASTER_URI=http://localhost:11311
+
+process[hector_costmap-1]: started with pid [22087]
+process[hector_driving_aid_markers-2]: started with pid [22088]
+process[hector_exploration_node-3]: started with pid [22089]
+[ INFO] [1605470441.663771097]: HectorCM: is up and running.
+[ WARN] [1605470442.026580020, 4.602000000]: global_costmap: Parameter "plugins" not provided, loading pre-Hydro parameters
+[ INFO] [1605470442.048673575, 4.621000000]: global_costmap: Using plugin "static_layer"
+[ INFO] [1605470442.056286799, 4.629000000]: Requesting the map...
+[ INFO] [1605470442.285662841, 4.840000000]: Resizing costmap to 4096 X 4096 at 0.050000 m/pix
+[ INFO] [1605470442.429666738, 4.976000000]: Received a 4096 X 4096 map at 0.050000 m/pix
+[ INFO] [1605470442.438496882, 4.986000000]: global_costmap: Using plugin "obstacle_layer"
+[ INFO] [1605470442.444049429, 4.990000000]:     Subscribed to Topics: 
+[ INFO] [1605470442.450823576, 4.996000000]: global_costmap: Using plugin "inflation_layer"
+[ INFO] [1605470442.483530681, 5.029000000]: [hector_exploration_planner] Initializing HectorExplorationPlanner
+[ INFO] [1605470442.655996289, 5.184000000]: [hector_exploration_planner] Parameter set. security_const: 0.500000, min_obstacle_dist: 1000, plan_in_unknown: 1, use_inflated_obstacle: 1, p_goal_angle_penalty_:50 , min_frontier_size: 5, p_dist_for_goal_reached_: 0.250000, same_frontier: 0.250000
+
+
+
+------No hay errores pero no funnciona nada nuevo-------
+	me bajo de la vida.
+
+------ESTA VIVO----------------------------------------
+	Era tan sencillo, como indicar bien el topic al que el exploration_controller debia publicar la velocidad. Que es a /p3dx/cmd_vel
+
+	Tras eso, he modificado los valores límite de velocidad en el path_follower.cpp ya que se movia demasiado rapido y era incapaz de generar un mapa legible.
+
+	Una vez hecho esto, lanzando el nodo parece que intenta seguir caminos. No es que sea incapaz de andar en linea recta, pq le he visto hacerlo, pero no hace caso a la ruta que el mismo
+	se genera. Tambien se choca con las paredes de vez en cuando
+
+-------No lo mejoro-------------------------------
+
+	He conseguido reducir la zona de incertidumbre no se ni como, toqueteando un poco en el costmap.yaml
+	He probado a indicar que el robot es holonomico en el pathfollower.cpp, pero no parece hacer ningun cambio.
+
+
+
+
+-----CAMBIO DE PAQUETES A GMAPPING------------------
+
+	Apenas hay cosas que resaltar, tan solo he tenido que modificar la variable de /scan como siempre  en el archivo amcl_node.cpp
+
+
+-----HE AÑADIDO LA CAMARA--------------
+
+	he usado una camara de la libreria de gazebo, por lo que solo he tenido que añadir su definicion tando en el pioneer.xacro como su funcionalidad en pioneer.gazebo.
+	He decidido colocarla centrada en el robot a una altura justo por encima del laser, demanera que se pueda tener un gran campo de vision pero sin perder la percepción del
+	tamaño del robot
+
+-----TRAS UN TIEMPOO DESARROLLANDO MI PAQUETE-----
+
+----PARA QUE FUNCIONE LA LIBRERIA DE IMAGEN-----
+	Esta libreria requiere el paquete GTK3, pero necesita la libreria de desarrollador, no la que viene por defecto en linux:
+	sudo apt-get install libgtk-3-dev
+
+
+	
+
+
+
