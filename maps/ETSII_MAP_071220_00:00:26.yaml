@@ -1,0 +1,7 @@
+image: /home/pablo/catkin_ws/src/maps/ETSII_MAP_071220_00:00:26.pgm
+resolution: 0.050000
+origin: [-100.000000, -100.000000, 0.000000]
+negate: 0
+occupied_thresh: 0.65
+free_thresh: 0.196
+

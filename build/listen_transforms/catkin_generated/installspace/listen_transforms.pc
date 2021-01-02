@@ -1,0 +1,8 @@
+prefix=/home/pablo/catkin_ws/install
+
+Name: listen_transforms
+Description: Description of listen_transforms
+Version: 0.0.0
+Cflags: 
+Libs: -L${prefix}/lib 
+Requires: 
