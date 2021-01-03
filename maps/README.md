@@ -1,0 +1,1 @@
+Generated maps must be stored inside this folder
